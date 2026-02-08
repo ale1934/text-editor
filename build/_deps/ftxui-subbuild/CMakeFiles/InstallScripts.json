@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/ale/Programming/editor/build/_deps/ftxui-subbuild/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
