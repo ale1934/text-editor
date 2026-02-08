@@ -1,3 +1,0 @@
-/home/ale/Programming/editor/build/_deps/ftxui-subbuild/CMakeFiles/ftxui-populate.dir
-/home/ale/Programming/editor/build/_deps/ftxui-subbuild/CMakeFiles/edit_cache.dir
-/home/ale/Programming/editor/build/_deps/ftxui-subbuild/CMakeFiles/rebuild_cache.dir
