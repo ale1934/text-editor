@@ -14,19 +14,6 @@
 using namespace __gnu_cxx;
 using namespace ftxui;
 
-// Custom Button
-ButtonOption Style() {
-  auto option = ButtonOption::Animated();
-  option.transform = [](const EntryState& s) {
-    auto element = text(s.label);
-    if (s.focused) {
-      element |= bold;
-    }
-    return element | center | borderEmpty | flex;
-  };
-  return option;
-}
-
 // Save file to file name 
 void SaveFile(std::vector<crope> &doc, const std::string &filepath) {
   if (filepath == "")
