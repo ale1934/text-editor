@@ -126,27 +126,36 @@ Token Lexer::NextToken() {
 }
 
 std::string Lexer::ReadString() {
-    std::string result = "\"";  // opening quote
-    
-    while (true) {
-        ReadChar();
-        
-        if (ch == '"' || ch == 0) {
-            break;
-        }
+  std::string result = "\"";
 
-        if (ch == '\\') {
-            ReadChar();
-            if (ch == 'n') result += '\n';
-            else if (ch == 't') result += '\t';
-            else result += ch;
-        } else {
-            result += ch;
-        }
+  while (true) {
+    ReadChar();
+
+    if (ch == '"' || ch == 0) {
+      break;
     }
 
-    result += "\"";  // closing quote
-    return result;
+    if (ch == '\\') {
+      ReadChar();
+      if (ch == 'n')
+        result += "\\n"; // keep as literal \n
+      else if (ch == 't')
+        result += "\\t"; // keep as literal \t
+      else if (ch == '\\')
+        result += "\\\\"; // escaped backslash
+      else if (ch == '"')
+        result += "\\\""; // escaped quote
+      else {
+        result += '\\';
+        result += ch;
+      } // unknown escape, preserve both chars
+    } else {
+      result += ch;
+    }
+  }
+
+  result += "\"";
+  return result;
 }
 
 void Lexer::SkipWhiteSpace() {

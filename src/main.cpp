@@ -396,7 +396,14 @@ int main(int argc, char *argv[]) {
              }),
   });
 
-  auto sidebar_switcher = Container::Tab({file_buttons}, &side_bar_page);
+  // Edit sidebar
+  auto edit_buttons = Container::Vertical({
+      Button("Search (/)", [&] {}),
+      Button("Jump To (.)", [&] {}),
+  });
+
+  auto sidebar_switcher =
+      Container::Tab({edit_buttons, file_buttons}, &side_bar_page);
 
   auto sidebar_component =
       Renderer(sidebar_switcher,
@@ -465,7 +472,11 @@ int main(int argc, char *argv[]) {
         return true;
       }
 
-      if (event.is_character() || event.character().c_str()[0] == '"') {
+      if (event.is_character() ||
+          (!event.character().empty() &&
+           (unsigned char)event.character().c_str()[0] >= 32 &&
+           event.character().c_str()[0] != 127 // not DEL
+           )) {
         document[current_line].insert(current_col, event.character().c_str());
         current_col++;
         file_saved = false;
@@ -766,6 +777,13 @@ int main(int argc, char *argv[]) {
     if (event == Event::CtrlO) {
       file_input = true;
       current_cmd = OPENFILE;
+    }
+
+    if (event == Event::CtrlR) {
+      file_input = true;
+      current_cmd = RENAME;
+      command_line.clear();
+      command_line.append(current_file.c_str());
     }
 
     return false;
