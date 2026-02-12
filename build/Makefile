@@ -57,10 +57,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/ale/Projects/text-editor
+CMAKE_SOURCE_DIR = /home/ale/Programming/text-editor
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/ale/Projects/text-editor/build
+CMAKE_BINARY_DIR = /home/ale/Programming/text-editor/build
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -152,9 +152,9 @@ install/strip/fast: preinstall/fast
 
 # The main all target
 all: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/ale/Projects/text-editor/build/CMakeFiles /home/ale/Projects/text-editor/build//CMakeFiles/progress.marks
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/ale/Programming/text-editor/build/CMakeFiles /home/ale/Programming/text-editor/build//CMakeFiles/progress.marks
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/ale/Projects/text-editor/build/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/ale/Programming/text-editor/build/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
@@ -233,6 +233,30 @@ component/fast:
 	$(MAKE) $(MAKESILENT) -f _deps/ftxui-build/CMakeFiles/component.dir/build.make _deps/ftxui-build/CMakeFiles/component.dir/build
 .PHONY : component/fast
 
+src/lexer.o: src/lexer.cpp.o
+.PHONY : src/lexer.o
+
+# target to build an object file
+src/lexer.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/main.dir/build.make CMakeFiles/main.dir/src/lexer.cpp.o
+.PHONY : src/lexer.cpp.o
+
+src/lexer.i: src/lexer.cpp.i
+.PHONY : src/lexer.i
+
+# target to preprocess a source file
+src/lexer.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/main.dir/build.make CMakeFiles/main.dir/src/lexer.cpp.i
+.PHONY : src/lexer.cpp.i
+
+src/lexer.s: src/lexer.cpp.s
+.PHONY : src/lexer.s
+
+# target to generate assembly for a file
+src/lexer.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/main.dir/build.make CMakeFiles/main.dir/src/lexer.cpp.s
+.PHONY : src/lexer.cpp.s
+
 src/main.o: src/main.cpp.o
 .PHONY : src/main.o
 
@@ -257,6 +281,30 @@ src/main.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/main.dir/build.make CMakeFiles/main.dir/src/main.cpp.s
 .PHONY : src/main.cpp.s
 
+src/token.o: src/token.cpp.o
+.PHONY : src/token.o
+
+# target to build an object file
+src/token.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/main.dir/build.make CMakeFiles/main.dir/src/token.cpp.o
+.PHONY : src/token.cpp.o
+
+src/token.i: src/token.cpp.i
+.PHONY : src/token.i
+
+# target to preprocess a source file
+src/token.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/main.dir/build.make CMakeFiles/main.dir/src/token.cpp.i
+.PHONY : src/token.cpp.i
+
+src/token.s: src/token.cpp.s
+.PHONY : src/token.s
+
+# target to generate assembly for a file
+src/token.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/main.dir/build.make CMakeFiles/main.dir/src/token.cpp.s
+.PHONY : src/token.cpp.s
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -275,9 +323,15 @@ help:
 	@echo "... dom"
 	@echo "... main"
 	@echo "... screen"
+	@echo "... src/lexer.o"
+	@echo "... src/lexer.i"
+	@echo "... src/lexer.s"
 	@echo "... src/main.o"
 	@echo "... src/main.i"
 	@echo "... src/main.s"
+	@echo "... src/token.o"
+	@echo "... src/token.i"
+	@echo "... src/token.s"
 .PHONY : help
 
 

@@ -1,5 +1,7 @@
+#include "lexer.h"
 #include <algorithm>
 #include <ext/rope>
+#include <filesystem>
 #include <fstream>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
@@ -19,6 +21,54 @@
 using namespace __gnu_cxx;
 using namespace ftxui;
 
+// Syntax highlighting should only turn on for .soph files
+bool should_highlight = true;
+
+Color ColorForToken(TokenType type) {
+  switch (type) {
+  case TokenType::VAR:
+  case TokenType::RETURN:
+  case TokenType::IF:
+  case TokenType::ELSE:
+  case TokenType::FUNCTION:
+    return Color::DeepPink1;
+
+  case TokenType::TRUE:
+  case TokenType::FALSE:
+    return Color::LightGreen;
+
+  case TokenType::INT:
+    return Color::Yellow;
+
+  case TokenType::IDENT:
+    return Color::Orange1;
+
+  case TokenType::PLUS:
+  case TokenType::MINUS:
+  case TokenType::SLASH:
+  case TokenType::ASTERISK:
+  case TokenType::EQ:
+  case TokenType::NEQ:
+    return Color::Cyan;
+
+  default:
+    return Color::LightSkyBlue1;
+  }
+}
+
+Element HighlightLine(const std::string &line) {
+  Lexer lexer(line);
+  std::vector<Element> parts;
+
+  Token tok = lexer.NextToken();
+  while (tok.type != TokenType::END_OF_FILE) {
+    parts.push_back(text(tok.literal) | color(ColorForToken(tok.type)));
+    tok = lexer.NextToken();
+  }
+
+  return hbox(std::move(parts));
+}
+
 // Save file to file name
 void SaveFile(std::vector<crope> &doc, const std::string &filepath) {
   if (filepath == "")
@@ -36,9 +86,8 @@ void SaveFile(std::vector<crope> &doc, const std::string &filepath) {
   file.close();
 }
 
-// Load file from file path and add each string to document
 void LoadFile(std::vector<crope> &doc, const std::string &filepath) {
-  doc.clear(); // Clear past document first
+  doc.clear();
 
   std::ifstream file(filepath);
   if (!file.is_open()) {
@@ -54,12 +103,18 @@ void LoadFile(std::vector<crope> &doc, const std::string &filepath) {
   if (doc.empty())
     doc.push_back("");
 
+  std::filesystem::path fs = filepath;
+  if (fs.extension() == ".soph")
+    should_highlight = true;
+  else 
+    should_highlight = false;
+
   file.close();
 }
 
 int main(int argc, char *argv[]) {
   // Logic
-  std::string current_file = "untitled.txt";
+  std::string current_file = "untitled.soph";
   std::vector<crope> document;
   std::vector<crope> copyReg;
   crope command_line;
@@ -185,17 +240,23 @@ int main(int argc, char *argv[]) {
           std::string after =
               current_col < line.length() ? line.substr(current_col + 1) : "";
 
-          visible.push_back(
-              hbox({text(padded) | color(Color::GrayLight),
-                    text(before) | color(Color::LightSkyBlue1),
-                    text(cursor_char) |
-                        (current_mode ? inverted : bgcolor(Color::White)),
-                    text(after) | color(Color::LightSkyBlue1)}));
+          visible.push_back(hbox({
+              text(padded) | color(Color::GrayLight),
+              should_highlight ? HighlightLine(before)
+                               : text(before) | color(Color::LightSkyBlue1),
+              text(cursor_char) |
+                  (current_mode ? inverted : bgcolor(Color::White)),
+              should_highlight ? HighlightLine(after)
+                               : text(after) | color(Color::LightSkyBlue1),
+          }));
         } else {
           // Regular line without cursor
-          visible.push_back(
-              hbox({text(padded) | color(Color::GrayDark),
-                    text(document[i].c_str()) | color(Color::Blue)}));
+          std::string line = document[i].c_str();
+
+          visible.push_back(hbox(
+              {text(padded) | color(Color::GrayDark),
+               should_highlight ? HighlightLine(line)
+                                : text(line) | color(Color::LightSkyBlue1)}));
         }
       }
     }
@@ -300,18 +361,36 @@ int main(int argc, char *argv[]) {
     // In insert mode, editor gets ALL keyboard input first
     if (current_mode == INSERT) {
       if (event == Event::Return) {
-        if (document[current_line].length() == current_col)
-          document.insert(document.begin() + current_line + 1, "");
-        else {
-          document.insert(
-              document.begin() + current_line + 1,
-              document[current_line].substr(
-                  current_col, document[current_line].length() - current_col));
-          document[current_line].erase(current_col,
-                                       document[current_line].length());
+        std::string current = document[current_line].c_str();
+
+        // Split line at cursor
+        std::string before = current.substr(0, current_col);
+        std::string after = current.substr(current_col);
+
+        document[current_line] = before.c_str();
+
+        // Detect indentation from 'before'
+        std::string indentation;
+        for (char c : before) {
+          if (c == ' ')
+            indentation += ' ';
+          else
+            break;
         }
-        current_col = 0;
+
+        document.insert(document.begin() + current_line + 1,
+                        (indentation + after).c_str());
+
         current_line++;
+        current_col = indentation.length();
+        file_saved = false;
+        return true;
+      }
+      if (event == Event::Tab) {
+        const int tab_size = 4; // change if you want
+        document[current_line].insert(current_col,
+                                      std::string(tab_size, ' ').c_str());
+        current_col += tab_size;
         file_saved = false;
         return true;
       }

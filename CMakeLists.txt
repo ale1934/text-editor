@@ -8,7 +8,7 @@ FetchContent_Declare(ftxui
 )
 FetchContent_MakeAvailable(ftxui)
 
-add_executable(main src/main.cpp)
+add_executable(main src/main.cpp src/lexer.cpp src/token.cpp)
 target_link_libraries(main
   PRIVATE ftxui::screen
   PRIVATE ftxui::dom
