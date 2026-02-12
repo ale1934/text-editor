@@ -190,12 +190,10 @@ int main(int argc, char *argv[]) {
   int selection_end_line = 0;
   int selection_end_col = 0;
 
-  int side_bar_page = 0;
   int current_cmd = NONE;
 
   bool file_saved = false;
   bool current_mode = NORMAL;
-  bool side_bar_open = false;
   bool is_dragging = false;
   bool file_input = false;
 
@@ -372,58 +370,7 @@ int main(int argc, char *argv[]) {
         std::max(0, std::min(current_line, (int)document.size() - 1));
   };
 
-  // File sidebar
-  auto file_buttons = Container::Vertical({
-      Button("Save (Ctrl+S)",
-             [&] {
-               SaveFile(document, current_file);
-               file_saved = true;
-               side_bar_open = false;
-             }),
-      Button("Open (Ctrl+O)",
-             [&] {
-               file_input = true;
-               current_cmd = OPENFILE;
-               side_bar_open = false;
-             }),
-      Button("Rename (Ctrl+R)",
-             [&] {
-               file_input = true;
-               current_cmd = RENAME;
-               command_line.clear();
-               command_line.append(current_file.c_str());
-               side_bar_open = false;
-             }),
-  });
-
-  // Edit sidebar
-  auto edit_buttons = Container::Vertical({
-      Button("Search (/)", [&] {}),
-      Button("Jump To (.)", [&] {}),
-  });
-
-  auto sidebar_switcher =
-      Container::Tab({edit_buttons, file_buttons}, &side_bar_page);
-
-  auto sidebar_component =
-      Renderer(sidebar_switcher,
-               [&] {
-                 if (!side_bar_open)
-                   return emptyElement();
-
-                 std::string page_title;
-                 if (side_bar_page == 0)
-                   page_title = "File";
-                 else if (side_bar_page == 1)
-                   page_title = "Edit";
-                 else if (side_bar_page == 2)
-                   page_title = "Theme";
-
-                 return vbox({text(page_title) | bold | center, separator(),
-                              sidebar_switcher->Render()}) |
-                        border | size(WIDTH, EQUAL, 20);
-               }) |
-      Maybe([&] { return !file_input; });
+  auto terminal_component = Renderer([&] { return vbox(emptyElement()); });
 
   auto editor_with_prio = Container::Vertical({editor_area | flex});
 
@@ -507,7 +454,7 @@ int main(int argc, char *argv[]) {
   });
 
   auto main_screen =
-      Container::Horizontal({editor_with_prio | flex, sidebar_component});
+      Container::Horizontal({terminal_component, editor_with_prio | flex});
 
   main_screen |= CatchEvent([&](Event event) {
     if (current_mode == NORMAL) {
@@ -629,15 +576,7 @@ int main(int argc, char *argv[]) {
           }
         }
 
-        if (event == Event::Character('1') || event == Event::Character('2') ||
-            event == Event::Character('3')) {
-          side_bar_open = true;
-          side_bar_page = stoi(event.character());
-          return true;
-        }
-
         if (event == Event::Escape) {
-          side_bar_open = false;
           is_dragging = false;
           return true;
         }
