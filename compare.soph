@@ -1,9 +1,0 @@
-var bigger_than = @(x, y) {
-    if (x > y) { 
-        return true;
-    } else {
-        return false;
-    }
-}
-
-bigger_than(10,5);

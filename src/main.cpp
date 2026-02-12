@@ -1,4 +1,5 @@
 #include "lexer.h"
+#include "token.h"
 #include <algorithm>
 #include <ext/rope>
 #include <filesystem>
@@ -32,6 +33,10 @@ Color ColorForToken(TokenType type) {
   case TokenType::ELSE:
   case TokenType::FUNCTION:
     return Color::DeepPink1;
+
+  case TokenType::WHILE:
+  case TokenType::FOR:
+    return Color::Red;
 
   case TokenType::TRUE:
   case TokenType::FALSE:
@@ -106,7 +111,7 @@ void LoadFile(std::vector<crope> &doc, const std::string &filepath) {
   std::filesystem::path fs = filepath;
   if (fs.extension() == ".soph")
     should_highlight = true;
-  else 
+  else
     should_highlight = false;
 
   file.close();
@@ -363,13 +368,11 @@ int main(int argc, char *argv[]) {
       if (event == Event::Return) {
         std::string current = document[current_line].c_str();
 
-        // Split line at cursor
         std::string before = current.substr(0, current_col);
         std::string after = current.substr(current_col);
 
         document[current_line] = before.c_str();
 
-        // Detect indentation from 'before'
         std::string indentation;
         for (char c : before) {
           if (c == ' ')
@@ -378,14 +381,23 @@ int main(int argc, char *argv[]) {
             break;
         }
 
+        size_t last_char_pos = before.find_last_not_of(" \t\r\n");
+        if (last_char_pos != std::string::npos &&
+            before[last_char_pos] == '{') {
+          const int tab_size = 4;
+          indentation += std::string(tab_size, ' ');
+        }
+
         document.insert(document.begin() + current_line + 1,
                         (indentation + after).c_str());
 
         current_line++;
         current_col = indentation.length();
         file_saved = false;
+
         return true;
       }
+
       if (event == Event::Tab) {
         const int tab_size = 4; // change if you want
         document[current_line].insert(current_col,
