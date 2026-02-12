@@ -18,14 +18,18 @@ Token Lexer::NextToken() {
   if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
     std::string literal;
     while (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
-        literal += ch;
-        ReadChar();
+      literal += ch;
+      ReadChar();
     }
     return Token(TokenType::WHITESPACE, literal);
-}
-
+  }
 
   switch (ch) {
+  case '"': {
+    std::string literal = ReadString();
+    ReadChar();
+    return Token(TokenType::STRING, literal);
+  }
   case '=':
     if (PeekChar() == '=') {
       char c = ch;
@@ -121,6 +125,30 @@ Token Lexer::NextToken() {
   }
 }
 
+std::string Lexer::ReadString() {
+    std::string result = "\"";  // opening quote
+    
+    while (true) {
+        ReadChar();
+        
+        if (ch == '"' || ch == 0) {
+            break;
+        }
+
+        if (ch == '\\') {
+            ReadChar();
+            if (ch == 'n') result += '\n';
+            else if (ch == 't') result += '\t';
+            else result += ch;
+        } else {
+            result += ch;
+        }
+    }
+
+    result += "\"";  // closing quote
+    return result;
+}
+
 void Lexer::SkipWhiteSpace() {
   while (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r')
     ReadChar();
@@ -151,7 +179,7 @@ std::string Lexer::ReadNumber() {
 
 void Lexer::ReadChar() {
   if (readPosition >= input.size()) {
-    ch = 0; 
+    ch = 0;
   } else {
     ch = input[readPosition];
   }
@@ -161,9 +189,7 @@ void Lexer::ReadChar() {
 }
 
 void Lexer::SkipLineComment() {
-    while (ch != '\n' && ch != 0) {
-        ReadChar();
-    }
+  while (ch != '\n' && ch != 0) {
+    ReadChar();
+  }
 }
-
-

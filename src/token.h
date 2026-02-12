@@ -28,6 +28,7 @@ enum class TokenType {
   GTE,
 
   // Delimiters
+  STRING,
   COMMA,
   SEMICOLON,
   LPAREN,
@@ -91,6 +92,8 @@ inline std::string TokenTypeToString(TokenType type) {
     return "GTE";
 
   // Delimiters
+  case TokenType::STRING:
+    return "STRING";
   case TokenType::COMMA:
     return "COMMA";
   case TokenType::SEMICOLON:

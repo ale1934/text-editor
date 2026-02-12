@@ -182,17 +182,17 @@ depend:
 .PHONY : depend
 
 #=============================================================================
-# Target rules for targets named sedit
+# Target rules for targets named soph-editor
 
 # Build rule for target.
-sedit: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 sedit
-.PHONY : sedit
+soph-editor: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 soph-editor
+.PHONY : soph-editor
 
 # fast build rule for target.
-sedit/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/sedit.dir/build.make CMakeFiles/sedit.dir/build
-.PHONY : sedit/fast
+soph-editor/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/soph-editor.dir/build.make CMakeFiles/soph-editor.dir/build
+.PHONY : soph-editor/fast
 
 #=============================================================================
 # Target rules for targets named screen
@@ -238,7 +238,7 @@ src/lexer.o: src/lexer.cpp.o
 
 # target to build an object file
 src/lexer.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/sedit.dir/build.make CMakeFiles/sedit.dir/src/lexer.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/soph-editor.dir/build.make CMakeFiles/soph-editor.dir/src/lexer.cpp.o
 .PHONY : src/lexer.cpp.o
 
 src/lexer.i: src/lexer.cpp.i
@@ -246,7 +246,7 @@ src/lexer.i: src/lexer.cpp.i
 
 # target to preprocess a source file
 src/lexer.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/sedit.dir/build.make CMakeFiles/sedit.dir/src/lexer.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/soph-editor.dir/build.make CMakeFiles/soph-editor.dir/src/lexer.cpp.i
 .PHONY : src/lexer.cpp.i
 
 src/lexer.s: src/lexer.cpp.s
@@ -254,7 +254,7 @@ src/lexer.s: src/lexer.cpp.s
 
 # target to generate assembly for a file
 src/lexer.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/sedit.dir/build.make CMakeFiles/sedit.dir/src/lexer.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/soph-editor.dir/build.make CMakeFiles/soph-editor.dir/src/lexer.cpp.s
 .PHONY : src/lexer.cpp.s
 
 src/main.o: src/main.cpp.o
@@ -262,7 +262,7 @@ src/main.o: src/main.cpp.o
 
 # target to build an object file
 src/main.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/sedit.dir/build.make CMakeFiles/sedit.dir/src/main.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/soph-editor.dir/build.make CMakeFiles/soph-editor.dir/src/main.cpp.o
 .PHONY : src/main.cpp.o
 
 src/main.i: src/main.cpp.i
@@ -270,7 +270,7 @@ src/main.i: src/main.cpp.i
 
 # target to preprocess a source file
 src/main.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/sedit.dir/build.make CMakeFiles/sedit.dir/src/main.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/soph-editor.dir/build.make CMakeFiles/soph-editor.dir/src/main.cpp.i
 .PHONY : src/main.cpp.i
 
 src/main.s: src/main.cpp.s
@@ -278,7 +278,7 @@ src/main.s: src/main.cpp.s
 
 # target to generate assembly for a file
 src/main.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/sedit.dir/build.make CMakeFiles/sedit.dir/src/main.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/soph-editor.dir/build.make CMakeFiles/soph-editor.dir/src/main.cpp.s
 .PHONY : src/main.cpp.s
 
 src/token.o: src/token.cpp.o
@@ -286,7 +286,7 @@ src/token.o: src/token.cpp.o
 
 # target to build an object file
 src/token.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/sedit.dir/build.make CMakeFiles/sedit.dir/src/token.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/soph-editor.dir/build.make CMakeFiles/soph-editor.dir/src/token.cpp.o
 .PHONY : src/token.cpp.o
 
 src/token.i: src/token.cpp.i
@@ -294,7 +294,7 @@ src/token.i: src/token.cpp.i
 
 # target to preprocess a source file
 src/token.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/sedit.dir/build.make CMakeFiles/sedit.dir/src/token.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/soph-editor.dir/build.make CMakeFiles/soph-editor.dir/src/token.cpp.i
 .PHONY : src/token.cpp.i
 
 src/token.s: src/token.cpp.s
@@ -302,7 +302,7 @@ src/token.s: src/token.cpp.s
 
 # target to generate assembly for a file
 src/token.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/sedit.dir/build.make CMakeFiles/sedit.dir/src/token.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/soph-editor.dir/build.make CMakeFiles/soph-editor.dir/src/token.cpp.s
 .PHONY : src/token.cpp.s
 
 # Help Target
@@ -322,7 +322,7 @@ help:
 	@echo "... component"
 	@echo "... dom"
 	@echo "... screen"
-	@echo "... sedit"
+	@echo "... soph-editor"
 	@echo "... src/lexer.o"
 	@echo "... src/lexer.i"
 	@echo "... src/lexer.s"

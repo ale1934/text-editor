@@ -13,6 +13,7 @@ private:
   void SkipLineComment();
   std::string ReadIdentifier();
   std::string ReadNumber();
+  std::string ReadString();
   char PeekChar();
 
 public:

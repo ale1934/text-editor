@@ -8,8 +8,9 @@ FetchContent_Declare(ftxui
 )
 FetchContent_MakeAvailable(ftxui)
 
-add_executable(sedit src/main.cpp src/lexer.cpp src/token.cpp)
-target_link_libraries(sedit
+add_executable(soph-editor src/main.cpp src/lexer.cpp src/token.cpp)
+set_target_properties(soph-editor PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/../bin/")
+target_link_libraries(soph-editor
   PRIVATE ftxui::screen
   PRIVATE ftxui::dom
   PRIVATE ftxui::component

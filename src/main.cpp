@@ -38,6 +38,9 @@ Color ColorForToken(TokenType type) {
   case TokenType::FOR:
     return Color::Red;
 
+  case TokenType::STRING:
+    return Color::Green;
+
   case TokenType::TRUE:
   case TokenType::FALSE:
     return Color::LightGreen;
@@ -61,16 +64,66 @@ Color ColorForToken(TokenType type) {
   }
 }
 
-Element HighlightLine(const std::string &line) {
+std::vector<std::pair<std::string, Color>>
+TokenizeWithColors(const std::string &line) {
   Lexer lexer(line);
-  std::vector<Element> parts;
+  std::vector<std::pair<std::string, Color>> parts;
 
   Token tok = lexer.NextToken();
   while (tok.type != TokenType::END_OF_FILE) {
-    parts.push_back(text(tok.literal) | color(ColorForToken(tok.type)));
+    parts.push_back({tok.literal, ColorForToken(tok.type)});
     tok = lexer.NextToken();
   }
 
+  return parts;
+}
+
+Elements BuildLineWithCursor(const std::string &line, int cursor_col,
+                             bool insert_mode) {
+  auto tokens = TokenizeWithColors(line);
+  Elements result;
+  int char_pos = 0;
+
+  for (auto &[literal, col] : tokens) {
+    int token_start = char_pos;
+    int token_end = char_pos + literal.size();
+
+    if (cursor_col >= token_start && cursor_col < token_end) {
+      // Cursor lands inside this token — split it
+      int local = cursor_col - token_start;
+      std::string before = literal.substr(0, local);
+      std::string cursor_char = std::string(1, literal[local]);
+      std::string after = literal.substr(local + 1);
+
+      if (!before.empty())
+        result.push_back(text(before) | color(col));
+
+      result.push_back(text(cursor_char) |
+                       (insert_mode ? inverted : bgcolor(Color::White)));
+
+      if (!after.empty())
+        result.push_back(text(after) | color(col));
+    } else {
+      result.push_back(text(literal) | color(col));
+    }
+
+    char_pos = token_end;
+  }
+
+  // Cursor is past the end of all tokens (empty line or end of line)
+  if (cursor_col >= char_pos) {
+    result.push_back(text(" ") |
+                     (insert_mode ? inverted : bgcolor(Color::White)));
+  }
+
+  return result;
+}
+
+Element HighlightLine(const std::string &line) {
+  auto tokens = TokenizeWithColors(line);
+  Elements parts;
+  for (auto &[literal, col] : tokens)
+    parts.push_back(text(literal) | color(col));
   return hbox(std::move(parts));
 }
 
@@ -236,24 +289,29 @@ int main(int argc, char *argv[]) {
             line_num_str + " ";
 
         if (i == current_line) {
-          // This is the line with the cursor
           std::string line = document[i].c_str();
-          std::string before = line.substr(0, current_col);
-          std::string cursor_char = current_col < line.length()
-                                        ? std::string(1, line[current_col])
-                                        : " ";
-          std::string after =
-              current_col < line.length() ? line.substr(current_col + 1) : "";
+          Elements line_elements = {text(padded) | color(Color::GrayLight)};
 
-          visible.push_back(hbox({
-              text(padded) | color(Color::GrayLight),
-              should_highlight ? HighlightLine(before)
-                               : text(before) | color(Color::LightSkyBlue1),
-              text(cursor_char) |
-                  (current_mode ? inverted : bgcolor(Color::White)),
-              should_highlight ? HighlightLine(after)
-                               : text(after) | color(Color::LightSkyBlue1),
-          }));
+          if (should_highlight) {
+            auto parts = BuildLineWithCursor(line, current_col, current_mode);
+            line_elements.insert(line_elements.end(), parts.begin(),
+                                 parts.end());
+          } else {
+            // plain mode, same logic without colors
+            std::string before = line.substr(0, current_col);
+            std::string cursor_char = current_col < line.size()
+                                          ? std::string(1, line[current_col])
+                                          : " ";
+            std::string after =
+                current_col < line.size() ? line.substr(current_col + 1) : "";
+            line_elements.push_back(text(before) | color(Color::LightSkyBlue1));
+            line_elements.push_back(
+                text(cursor_char) |
+                (current_mode ? inverted : bgcolor(Color::White)));
+            line_elements.push_back(text(after) | color(Color::LightSkyBlue1));
+          }
+
+          visible.push_back(hbox(std::move(line_elements)));
         } else {
           // Regular line without cursor
           std::string line = document[i].c_str();
@@ -407,7 +465,7 @@ int main(int argc, char *argv[]) {
         return true;
       }
 
-      if (event.is_character()) {
+      if (event.is_character() || event.character().c_str()[0] == '"') {
         document[current_line].insert(current_col, event.character().c_str());
         current_col++;
         file_saved = false;
@@ -488,16 +546,35 @@ int main(int argc, char *argv[]) {
               std::swap(selection_start_col, selection_end_col);
             }
 
-            for (int i = start; i <= end; ++i) {
-              if (i == start)
-                document[i].erase(selection_start_col, document[i].length());
-              else if (i == end)
-                document[i].erase(0, selection_end_col);
-              else {
-                document[i].clear();
-                document.erase(document.begin() + i);
-              }
+            if (start == end) {
+              // Single line selection
+              int col_start = std::min(selection_start_col, selection_end_col);
+              int col_end = std::max(selection_start_col, selection_end_col);
+              document[start].erase(col_start, col_end - col_start);
+              current_col = col_start;
+            } else {
+              // Keep the part of the first line before selection
+              // and the part of the last line after selection, then join them
+              std::string keep_before =
+                  document[start].substr(0, selection_start_col).c_str();
+              std::string keep_after =
+                  document[end].substr(selection_end_col).c_str();
+
+              // Delete all lines in range except start
+              document.erase(document.begin() + start + 1,
+                             document.begin() + end + 1);
+
+              // Now join the two surviving halves on the start line
+              document[start] = (keep_before + keep_after).c_str();
+
+              current_col = selection_start_col;
             }
+
+            current_line = start;
+            // Clamp in case we deleted down to fewer lines
+            current_line = std::min(current_line, (int)document.size() - 1);
+            current_col =
+                std::min(current_col, (int)document[current_line].length());
 
             file_saved = false;
             is_dragging = false;
@@ -506,24 +583,33 @@ int main(int argc, char *argv[]) {
 
           if (event == Event::y) {
             copyReg.clear();
+
             if (start > end) {
               std::swap(start, end);
-              std::swap(selection_start_col, selection_end_col);
+              // don't swap cols — instead derive them from which line is which
             }
+
+            int top_col = (selection_start_line < selection_end_line)
+                              ? selection_start_col
+                              : selection_end_col;
+
+            int bottom_col = (selection_start_line < selection_end_line)
+                                 ? selection_end_col
+                                 : selection_start_col;
 
             if (start == end) {
               int col_start = std::min(selection_start_col, selection_end_col);
               int col_end = std::max(selection_start_col, selection_end_col);
               copyReg.push_back(
                   document[start].substr(col_start, col_end - col_start));
-            }
-            for (int i = start; i <= end; ++i) {
-              if (i == start)
-                copyReg.push_back(document[i].substr(selection_start_col));
-              else if (i == end)
-                copyReg.push_back(document[i].substr(0, selection_end_col));
-              else {
-                copyReg.push_back(document[i]);
+            } else {
+              for (int i = start; i <= end; ++i) {
+                if (i == start)
+                  copyReg.push_back(document[i].substr(top_col));
+                else if (i == end)
+                  copyReg.push_back(document[i].substr(0, bottom_col));
+                else
+                  copyReg.push_back(document[i]);
               }
             }
 
