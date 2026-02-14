@@ -2,14 +2,20 @@
 #include "token.h"
 #include <algorithm>
 #include <ext/rope>
-#include <filesystem>
+#include <fcntl.h>
 #include <fstream>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
+#include <ftxui/component/component_options.hpp>
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/screen.hpp>
 #include <ftxui/screen/string.hpp>
+#include <mutex>
+#include <signal.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <thread>
 #include <vector>
 
 #define NORMAL false
@@ -22,8 +28,133 @@
 using namespace __gnu_cxx;
 using namespace ftxui;
 
-// Syntax highlighting should only turn on for .soph files
-bool should_highlight = true;
+struct LiveProcess {
+  pid_t pid = -1;
+  int fd_in = -1;
+  int fd_out = -1;
+  std::thread reader;
+  std::mutex mtx;
+  std::queue<std::string> output_queue;
+  bool running = false;
+
+  void Stop() {
+    // Stop the reader first
+    {
+      std::lock_guard<std::mutex> lock(mtx);
+      running = false;
+    }
+
+    // Close FDs safely
+    if (fd_in >= 0) {
+      close(fd_in);
+      fd_in = -1;
+    }
+    if (fd_out >= 0) {
+      close(fd_out);
+      fd_out = -1;
+    }
+
+    // Wait for reader thread
+    if (reader.joinable())
+      reader.join();
+
+    // Kill child process if still alive
+    if (pid > 0) {
+      int status;
+      waitpid(pid, &status, WNOHANG); // non-blocking
+      pid = -1;
+    }
+
+    // Clear output
+    std::lock_guard<std::mutex> lock(mtx);
+    std::queue<std::string> empty;
+    std::swap(output_queue, empty);
+  }
+
+  void Start(const std::string &cmd, const std::vector<std::string> &args,
+             std::function<void()> on_output = nullptr) {
+    Stop(); // <-- make sure old process is fully stopped
+
+    int pipe_in[2], pipe_out[2];
+    if (pipe(pipe_in) == -1 || pipe(pipe_out) == -1)
+      return;
+
+    pid = fork();
+    if (pid == 0) {
+      dup2(pipe_in[0], STDIN_FILENO);
+      dup2(pipe_out[1], STDOUT_FILENO);
+      dup2(pipe_out[1], STDERR_FILENO);
+      close(pipe_in[0]);
+      close(pipe_in[1]);
+      close(pipe_out[0]);
+      close(pipe_out[1]);
+
+      std::vector<char *> argv;
+      argv.push_back((char *)cmd.c_str());
+      for (auto &a : args)
+        argv.push_back((char *)a.c_str());
+      argv.push_back(nullptr);
+      execvp(cmd.c_str(), argv.data());
+      _exit(1);
+    }
+
+    fd_in = pipe_in[1];
+    close(pipe_in[0]);
+    fd_out = pipe_out[0];
+    close(pipe_out[1]);
+
+    fcntl(fd_out, F_SETFL, O_NONBLOCK);
+
+    {
+      std::lock_guard<std::mutex> lock(mtx);
+      running = true;
+    }
+
+    reader = std::thread([this, on_output]() {
+      char buffer[256];
+      while (true) {
+        bool still_running;
+        {
+          std::lock_guard<std::mutex> lock(mtx);
+          still_running = running;
+        }
+        if (!still_running)
+          break;
+
+        ssize_t n = read(fd_out, buffer, sizeof(buffer));
+        if (n > 0) {
+          {
+            std::lock_guard<std::mutex> lock(mtx);
+            output_queue.push(std::string(buffer, n));
+          }
+          if (on_output)
+            on_output(); // <-- notify screen
+        } else if (n == 0) {
+          std::lock_guard<std::mutex> lock(mtx);
+          running = false;
+          break;
+        } else {
+          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+      }
+    });
+  }
+
+  void WriteInput(const std::string &input) {
+    if (fd_in >= 0)
+      write(fd_in, input.c_str(), input.size());
+  }
+
+  std::vector<std::string> FetchOutput() {
+    std::vector<std::string> out;
+    std::lock_guard<std::mutex> lock(mtx);
+    while (!output_queue.empty()) {
+      out.push_back(output_queue.front());
+      output_queue.pop();
+    }
+    return out;
+  }
+};
 
 Color ColorForToken(TokenType type) {
   switch (type) {
@@ -58,6 +189,9 @@ Color ColorForToken(TokenType type) {
   case TokenType::EQ:
   case TokenType::NEQ:
     return Color::Cyan;
+
+  case TokenType::COMMENT:
+    return Color::DarkSlateGray1;
 
   default:
     return Color::LightSkyBlue1;
@@ -161,12 +295,6 @@ void LoadFile(std::vector<crope> &doc, const std::string &filepath) {
   if (doc.empty())
     doc.push_back("");
 
-  std::filesystem::path fs = filepath;
-  if (fs.extension() == ".soph")
-    should_highlight = true;
-  else
-    should_highlight = false;
-
   file.close();
 }
 
@@ -175,8 +303,15 @@ int main(int argc, char *argv[]) {
   std::string current_file = "untitled.soph";
   std::vector<crope> document;
   std::vector<crope> copyReg;
+  std::vector<std::string> terminal_doc;
   crope command_line;
-  document.push_back(""); // Make sure document isnt empty
+  document.push_back("");
+
+  // Terminal Proc
+  LiveProcess proc;
+  bool show_terminal = false;
+  bool terminal_focused = false;
+  int current_term_line = 0;
 
   // Variables
   int scroll_speed = 2;
@@ -201,6 +336,9 @@ int main(int argc, char *argv[]) {
   if (argc > 1) {
     LoadFile(document, argv[1]);
     current_file = argv[1];
+    file_saved = true;
+  } else {
+    LoadFile(document, current_file);
     file_saved = true;
   }
 
@@ -268,14 +406,15 @@ int main(int argc, char *argv[]) {
           std::string after =
               (sel_end < line.length()) ? line.substr(sel_end) : "";
 
-          visible.push_back(
-              hbox({text(padded) | color(Color::GrayDark),
-                    text(before) | color(Color::Blue),
-                    text(selected) | inverted, // Highlight selection
-                    text(after) | color(Color::Blue)}));
+          Elements line_elements = {text(padded) | color(Color::GrayDark)};
+          auto parts = BuildLineWithCursor(line, current_col, current_mode) |
+                       bgcolor(Color::NavajoWhite1);
+
+          line_elements.insert(line_elements.end(), parts.begin(), parts.end());
+
+          visible.push_back(hbox(std::move(line_elements)));
         } else {
-          visible.push_back(hbox({text(padded) | color(Color::GrayDark),
-                                  text(line) | color(Color::Blue)}));
+          visible.push_back(hbox({HighlightLine(padded), HighlightLine(line)}));
         }
       }
     } else {
@@ -290,24 +429,8 @@ int main(int argc, char *argv[]) {
           std::string line = document[i].c_str();
           Elements line_elements = {text(padded) | color(Color::GrayLight)};
 
-          if (should_highlight) {
-            auto parts = BuildLineWithCursor(line, current_col, current_mode);
-            line_elements.insert(line_elements.end(), parts.begin(),
-                                 parts.end());
-          } else {
-            // plain mode, same logic without colors
-            std::string before = line.substr(0, current_col);
-            std::string cursor_char = current_col < line.size()
-                                          ? std::string(1, line[current_col])
-                                          : " ";
-            std::string after =
-                current_col < line.size() ? line.substr(current_col + 1) : "";
-            line_elements.push_back(text(before) | color(Color::LightSkyBlue1));
-            line_elements.push_back(
-                text(cursor_char) |
-                (current_mode ? inverted : bgcolor(Color::White)));
-            line_elements.push_back(text(after) | color(Color::LightSkyBlue1));
-          }
+          auto parts = BuildLineWithCursor(line, current_col, current_mode);
+          line_elements.insert(line_elements.end(), parts.begin(), parts.end());
 
           visible.push_back(hbox(std::move(line_elements)));
         } else {
@@ -315,9 +438,7 @@ int main(int argc, char *argv[]) {
           std::string line = document[i].c_str();
 
           visible.push_back(hbox(
-              {text(padded) | color(Color::GrayDark),
-               should_highlight ? HighlightLine(line)
-                                : text(line) | color(Color::LightSkyBlue1)}));
+              {text(padded) | color(Color::GrayDark), HighlightLine(line)}));
         }
       }
     }
@@ -370,19 +491,77 @@ int main(int argc, char *argv[]) {
         std::max(0, std::min(current_line, (int)document.size() - 1));
   };
 
-  auto terminal_component = Renderer([&] { return vbox(emptyElement()); });
+  int terminal_scroll_offset = 0;
 
-  auto editor_with_prio = Container::Vertical({editor_area | flex});
+  auto terminal_component = Renderer([&] {
+    auto new_lines = proc.FetchOutput();
 
-  editor_with_prio |= CatchEvent([&](Event event) {
-    // In insert mode, editor gets ALL keyboard input first
+    int term_height = Terminal::Size().dimy - 6;
+
+    bool was_at_bottom =
+        terminal_doc.empty() ||
+        (terminal_scroll_offset + term_height >= (int)terminal_doc.size());
+
+    if (was_at_bottom) {
+      terminal_scroll_offset =
+          std::max(0, (int)terminal_doc.size() - term_height);
+    }
+
+    // Split new output by '\n' and append
+    for (auto &line : new_lines) {
+      size_t start = 0;
+      size_t pos;
+      while ((pos = line.find('\n', start)) != std::string::npos) {
+        terminal_doc.push_back(line.substr(start, pos - start));
+        start = pos + 1;
+        current_term_line++;
+      }
+      if (start < line.size())
+        terminal_doc.push_back(line.substr(start));
+    }
+
+    if (was_at_bottom) {
+      terminal_scroll_offset =
+          std::max(0, (int)terminal_doc.size() - term_height);
+    }
+
+    Elements elements;
+    int start_line = terminal_scroll_offset;
+    int end_line = std::min((int)terminal_doc.size(), start_line + term_height);
+
+    for (int i = start_line; i < end_line; i++)
+      elements.push_back(text(terminal_doc[i].c_str()));
+
+    return vbox({text(" Soph Terminal - Output ") | bold | center, separator(),
+                 vbox(std::move(elements)) | flex, separator(),
+                 text((std::string) "Terminal ID: " +
+                      std::to_string(proc.pid))}) |
+           border | size(WIDTH, EQUAL, term_height + 10);
+  });
+
+  Component main_screen =
+      Container::Horizontal({editor_area, terminal_component});
+
+  main_screen = Renderer(main_screen, [&] {
+    Element editor_render = editor_area->Render();
+
+    if (!show_terminal)
+      return editor_render;
+
+    return hbox({editor_render | flex, terminal_component->Render()});
+  });
+
+  main_screen |= CatchEvent([&](Event event) {
+    // ── INSERT MODE ─────────────────────────────────────────────
     if (current_mode == INSERT) {
+      if (event == Event::Escape) {
+        current_mode = NORMAL;
+        return true;
+      }
       if (event == Event::Return) {
         std::string current = document[current_line].c_str();
-
         std::string before = current.substr(0, current_col);
         std::string after = current.substr(current_col);
-
         document[current_line] = before.c_str();
 
         std::string indentation;
@@ -392,44 +571,23 @@ int main(int argc, char *argv[]) {
           else
             break;
         }
-
         size_t last_char_pos = before.find_last_not_of(" \t\r\n");
-        if (last_char_pos != std::string::npos &&
-            before[last_char_pos] == '{') {
-          const int tab_size = 4;
-          indentation += std::string(tab_size, ' ');
-        }
+        if (last_char_pos != std::string::npos && before[last_char_pos] == '{')
+          indentation += std::string(4, ' ');
 
         document.insert(document.begin() + current_line + 1,
                         (indentation + after).c_str());
-
         current_line++;
         current_col = indentation.length();
         file_saved = false;
-
         return true;
       }
-
       if (event == Event::Tab) {
-        const int tab_size = 4; // change if you want
-        document[current_line].insert(current_col,
-                                      std::string(tab_size, ' ').c_str());
-        current_col += tab_size;
+        document[current_line].insert(current_col, std::string(4, ' ').c_str());
+        current_col += 4;
         file_saved = false;
         return true;
       }
-
-      if (event.is_character() ||
-          (!event.character().empty() &&
-           (unsigned char)event.character().c_str()[0] >= 32 &&
-           event.character().c_str()[0] != 127 // not DEL
-           )) {
-        document[current_line].insert(current_col, event.character().c_str());
-        current_col++;
-        file_saved = false;
-        return true;
-      }
-
       if (event == Event::Backspace) {
         if (current_col > 0) {
           document[current_line].erase(current_col - 1, 1);
@@ -443,143 +601,219 @@ int main(int argc, char *argv[]) {
         file_saved = false;
         return true;
       }
-
-      if (event == Event::Escape) {
-        current_mode = NORMAL;
+      if (!event.character().empty() &&
+          (unsigned char)event.character()[0] >= 32 &&
+          event.character()[0] != 127) {
+        document[current_line].insert(current_col, event.character().c_str());
+        current_col++;
+        file_saved = false;
         return true;
       }
     }
 
-    return false;
-  });
-
-  auto main_screen =
-      Container::Horizontal({terminal_component, editor_with_prio | flex});
-
-  main_screen |= CatchEvent([&](Event event) {
-    if (current_mode == NORMAL) {
+    else if (current_mode == NORMAL) {
       if (current_cmd == NONE) {
-        if (event == Event::Character('i')) {
-          current_mode = INSERT;
-          return true;
-        }
 
-        if (event == Event::v) {
-          selection_start_line = selection_end_line = current_line;
-          selection_start_col = selection_end_col = current_col;
-          is_dragging = true;
-          return true;
-        }
-
-        // Paste whats in the copy reg
-        if (event == Event::p) {
-          crope temp = document[current_line].substr(
-              current_col, document[current_line].length());
-          document[current_line].erase(current_col,
-                                       document[current_line].length());
-          for (int i = 0; i < copyReg.size(); i++) {
-            if (i == 0)
-              document[current_line].insert(current_col, copyReg[i]);
-            else {
-              document.insert(document.begin() + current_line + i, copyReg[i]);
+        if (terminal_focused && proc.running) {
+          if (event.is_mouse()) {
+            if (event.mouse().button == Mouse::WheelDown) {
+              terminal_scroll_offset =
+                  std::min(terminal_scroll_offset + 1,
+                           std::max(0, (int)terminal_doc.size() - 30));
+              return true;
+            }
+            if (event.mouse().button == Mouse::WheelUp) {
+              terminal_scroll_offset = std::max(0, terminal_scroll_offset - 1);
+              return true;
             }
           }
 
-          document[current_line + copyReg.size() - 1].append(temp.c_str());
-
-          file_saved = false;
-          return true;
-        }
-
-        // Selection Options
-        if (is_dragging) {
-          int step = (selection_end_line > selection_start_line) ? 1 : -1;
-
-          int start = selection_start_line;
-          int end = selection_end_line;
-
-          if (event == Event::d) {
-            if (start > end) {
-              std::swap(start, end);
-              std::swap(selection_start_col, selection_end_col);
-            }
-
-            if (start == end) {
-              // Single line selection
-              int col_start = std::min(selection_start_col, selection_end_col);
-              int col_end = std::max(selection_start_col, selection_end_col);
-              document[start].erase(col_start, col_end - col_start);
-              current_col = col_start;
-            } else {
-              // Keep the part of the first line before selection
-              // and the part of the last line after selection, then join them
-              std::string keep_before =
-                  document[start].substr(0, selection_start_col).c_str();
-              std::string keep_after =
-                  document[end].substr(selection_end_col).c_str();
-
-              // Delete all lines in range except start
-              document.erase(document.begin() + start + 1,
-                             document.begin() + end + 1);
-
-              // Now join the two surviving halves on the start line
-              document[start] = (keep_before + keep_after).c_str();
-
-              current_col = selection_start_col;
-            }
-
-            current_line = start;
-            // Clamp in case we deleted down to fewer lines
-            current_line = std::min(current_line, (int)document.size() - 1);
-            current_col =
-                std::min(current_col, (int)document[current_line].length());
-
-            file_saved = false;
-            is_dragging = false;
+          if (event == Event::ArrowUp) {
+            terminal_scroll_offset = std::max(0, terminal_scroll_offset - 1);
             return true;
           }
 
-          if (event == Event::y) {
-            copyReg.clear();
+          if (event == Event::ArrowDown) {
+            terminal_scroll_offset =
+                std::min(terminal_scroll_offset + 1,
+                         std::max(0, (int)terminal_doc.size() - 30));
+            return true;
+          }
 
-            if (start > end) {
-              std::swap(start, end);
-              // don't swap cols — instead derive them from which line is which
+          if (event.is_character()) {
+            proc.WriteInput(event.character().c_str());
+            terminal_doc[current_term_line].append(event.character());
+            return true;
+          }
+
+          if (event == Event::Return) {
+            proc.WriteInput("\n");
+            current_term_line++;
+            return true;
+          }
+          if (event == Event::Backspace) {
+            proc.WriteInput("\b");
+            terminal_doc[current_term_line].pop_back();
+            return true;
+          }
+        } else {
+          if (event.is_mouse()) {
+            if (event.mouse().button == Mouse::WheelDown) {
+              scroll_offset =
+                  std::min(scroll_offset + scroll_speed,
+                           std::max(0, (int)document.size() - visible_lines));
+              clamp_cursor_to_visible();
+              return true;
             }
 
-            int top_col = (selection_start_line < selection_end_line)
-                              ? selection_start_col
-                              : selection_end_col;
+            if (event.mouse().button == Mouse::WheelUp) {
+              scroll_offset = std::max(0, scroll_offset - scroll_speed);
+              clamp_cursor_to_visible();
+              return true;
+            }
 
-            int bottom_col = (selection_start_line < selection_end_line)
-                                 ? selection_end_col
-                                 : selection_start_col;
+            if (event.mouse().button == Mouse::Left) {
+              int mouse_y = event.mouse().y;
+              int mouse_x = event.mouse().x;
 
-            if (start == end) {
-              int col_start = std::min(selection_start_col, selection_end_col);
-              int col_end = std::max(selection_start_col, selection_end_col);
-              copyReg.push_back(
-                  document[start].substr(col_start, col_end - col_start));
-            } else {
-              for (int i = start; i <= end; ++i) {
-                if (i == start)
-                  copyReg.push_back(document[i].substr(top_col));
-                else if (i == end)
-                  copyReg.push_back(document[i].substr(0, bottom_col));
-                else
-                  copyReg.push_back(document[i]);
+              int clicked_line = mouse_y - 3 + scroll_offset;
+
+              // Clamp to valid range
+              if (clicked_line >= 0 && clicked_line < document.size()) {
+                current_line = clicked_line;
+                current_col = mouse_x - 6; // 6 for idk bordering i guess
+              }
+              return true;
+            }
+          }
+
+          if (event == Event::Character('i')) {
+            current_mode = INSERT;
+            return true;
+          }
+
+          if (event == Event::Character('v')) {
+            selection_start_line = selection_end_line = current_line;
+            selection_start_col = selection_end_col = current_col;
+            is_dragging = true;
+            return true;
+          }
+
+          // Paste whats in the copy reg
+          if (event == Event::Character('p')) {
+            crope temp = document[current_line].substr(
+                current_col, document[current_line].length());
+            document[current_line].erase(current_col,
+                                         document[current_line].length());
+            for (int i = 0; i < copyReg.size(); i++) {
+              if (i == 0)
+                document[current_line].insert(current_col, copyReg[i]);
+              else {
+                document.insert(document.begin() + current_line + i,
+                                copyReg[i]);
               }
             }
 
+            document[current_line + copyReg.size() - 1].append(temp.c_str());
+
+            file_saved = false;
+            return true;
+          }
+
+          // Selection Options
+          if (is_dragging) {
+            int step = (selection_end_line > selection_start_line) ? 1 : -1;
+
+            int start = selection_start_line;
+            int end = selection_end_line;
+
+            if (event == Event::Character('d')) {
+              if (start > end) {
+                std::swap(start, end);
+                std::swap(selection_start_col, selection_end_col);
+              }
+
+              if (start == end) {
+                // Single line selection
+                int col_start =
+                    std::min(selection_start_col, selection_end_col);
+                int col_end = std::max(selection_start_col, selection_end_col);
+                document[start].erase(col_start, col_end - col_start);
+                current_col = col_start;
+              } else {
+                // Keep the part of the first line before selection
+                // and the part of the last line after selection, then join them
+                std::string keep_before =
+                    document[start].substr(0, selection_start_col).c_str();
+                std::string keep_after =
+                    document[end].substr(selection_end_col).c_str();
+
+                // Delete all lines in range except start
+                document.erase(document.begin() + start + 1,
+                               document.begin() + end + 1);
+
+                // Now join the two surviving halves on the start line
+                document[start] = (keep_before + keep_after).c_str();
+
+                current_col = selection_start_col;
+              }
+
+              current_line = start;
+              // Clamp in case we deleted down to fewer lines
+              current_line = std::min(current_line, (int)document.size() - 1);
+              current_col =
+                  std::min(current_col, (int)document[current_line].length());
+
+              file_saved = false;
+              is_dragging = false;
+              return true;
+            }
+
+            if (event == Event::Character('y')) {
+              copyReg.clear();
+
+              if (start > end) {
+                std::swap(start, end);
+                // don't swap cols — instead derive them from which line is
+                // which
+              }
+
+              int top_col = (selection_start_line < selection_end_line)
+                                ? selection_start_col
+                                : selection_end_col;
+
+              int bottom_col = (selection_start_line < selection_end_line)
+                                   ? selection_end_col
+                                   : selection_start_col;
+
+              if (start == end) {
+                int col_start =
+                    std::min(selection_start_col, selection_end_col);
+                int col_end = std::max(selection_start_col, selection_end_col);
+                copyReg.push_back(
+                    document[start].substr(col_start, col_end - col_start));
+              } else {
+                for (int i = start; i <= end; ++i) {
+                  if (i == start)
+                    copyReg.push_back(document[i].substr(top_col));
+                  else if (i == end)
+                    copyReg.push_back(document[i].substr(0, bottom_col));
+                  else
+                    copyReg.push_back(document[i]);
+                }
+              }
+
+              is_dragging = false;
+              return true;
+            }
+          }
+
+          if (event == Event::Escape) {
             is_dragging = false;
             return true;
           }
         }
 
-        if (event == Event::Escape) {
-          is_dragging = false;
-          return true;
-        }
       } else if (current_cmd > NONE) {
         if (event.is_character()) {
           command_line.append(event.character().c_str());
@@ -600,7 +834,6 @@ int main(int argc, char *argv[]) {
             current_file = command_line.c_str();
             current_line = current_col = 0;
             command_line.clear();
-            editor_with_prio->TakeFocus();
             return true;
           }
         } else if (current_cmd == RENAME) {
@@ -609,113 +842,91 @@ int main(int argc, char *argv[]) {
             file_input = false;
             current_file = command_line.c_str();
             command_line.clear();
-            editor_with_prio->TakeFocus();
             return true;
           }
         }
+
+        if (event == Event::Escape) {
+          current_cmd = NONE;
+          file_input = false;
+          return true;
+        }
       }
     }
 
-    if (event.is_mouse()) {
-      if (event.mouse().button == Mouse::WheelDown) {
-        scroll_offset =
-            std::min(scroll_offset + scroll_speed,
-                     std::max(0, (int)document.size() - visible_lines));
-        clamp_cursor_to_visible();
+    if (!terminal_focused) {
+      if (event == Event::ArrowUp) {
+        if (current_line > 0) {
+          current_line--;
+          if (current_col > document[current_line].length())
+            current_col = document[current_line].length();
+
+          if (current_line < scroll_offset) {
+            scroll_offset--;
+          }
+        }
+
+        if (current_mode == NORMAL) {
+          selection_end_line = current_line;
+          selection_end_col = current_col;
+        }
+
         return true;
       }
 
-      if (event.mouse().button == Mouse::WheelUp) {
-        scroll_offset = std::max(0, scroll_offset - scroll_speed);
-        clamp_cursor_to_visible();
+      if (event == Event::ArrowDown) {
+        // Update Scroll Position
+        if (current_line < document.size() - 1) {
+          current_line++;
+          if (current_col > document[current_line].length())
+            current_col = document[current_line].length();
+
+          if (current_line >= scroll_offset + visible_lines) {
+            scroll_offset++;
+          }
+        }
+
+        if (current_mode == NORMAL) {
+          selection_end_line = current_line;
+          selection_end_col = current_col;
+        }
+
         return true;
       }
 
-      if (event.mouse().button == Mouse::Left) {
-        int mouse_y = event.mouse().y;
-        int mouse_x = event.mouse().x;
+      if (event == Event::ArrowRight) {
+        if (current_col < document[current_line].length()) {
+          current_col++;
+        }
 
-        // Account for top bar (assuming 3 line for top bar)
-        int clicked_line = mouse_y - 3 + scroll_offset;
-
-        // Clamp to valid range
-        if (clicked_line >= 0 && clicked_line < document.size()) {
-          current_line = clicked_line;
-          current_col = mouse_x - 6; // 6 for idk bordering i guess
+        if (current_mode == NORMAL) {
+          selection_end_col = current_col;
         }
         return true;
       }
-    }
 
-    if (event == Event::ArrowUp) {
-      if (current_line > 0) {
-        current_line--;
-        if (current_col > document[current_line].length())
-          current_col = document[current_line].length();
-
-        if (current_line < scroll_offset) {
-          scroll_offset--;
+      if (event == Event::ArrowLeft) {
+        if (current_col > 0) {
+          current_col--;
         }
-      }
 
-      if (current_mode == NORMAL) {
-        selection_end_line = current_line;
-        selection_end_col = current_col;
-      }
-
-      return true;
-    }
-
-    if (event == Event::ArrowDown) {
-      // Update Scroll Position
-      if (current_line < document.size() - 1) {
-        current_line++;
-        if (current_col > document[current_line].length())
-          current_col = document[current_line].length();
-
-        if (current_line >= scroll_offset + visible_lines) {
-          scroll_offset++;
+        if (current_mode == NORMAL) {
+          selection_end_col = current_col;
         }
+        return true;
       }
-
-      if (current_mode == NORMAL) {
-        selection_end_line = current_line;
-        selection_end_col = current_col;
-      }
-
-      return true;
-    }
-
-    if (event == Event::ArrowRight) {
-      if (current_col < document[current_line].length()) {
-        current_col++;
-      }
-
-      if (current_mode == NORMAL) {
-        selection_end_col = current_col;
-      }
-      return true;
-    }
-
-    if (event == Event::ArrowLeft) {
-      if (current_col > 0) {
-        current_col--;
-      }
-
-      if (current_mode == NORMAL) {
-        selection_end_col = current_col;
-      }
-      return true;
     }
 
     if (event == Event::CtrlS) {
       SaveFile(document, current_file);
       file_saved = true;
+      return true;
     }
 
     if (event == Event::CtrlO) {
       file_input = true;
       current_cmd = OPENFILE;
+      return true;
     }
 
     if (event == Event::CtrlR) {
@@ -723,11 +934,32 @@ int main(int argc, char *argv[]) {
       current_cmd = RENAME;
       command_line.clear();
       command_line.append(current_file.c_str());
+      return true;
+    }
+
+    if (event == Event::CtrlB) {
+      show_terminal = true;
+      current_mode = NORMAL;
+      terminal_doc.clear();
+      terminal_focused = true;
+      current_term_line = 0;
+      proc.Start("soph", {current_file},
+                 [&screen] { screen.PostEvent(Event::Custom); });
+      return true;
+    }
+
+    if (event == Event::CtrlT) {
+      show_terminal = !show_terminal;
+      terminal_focused = !terminal_focused;
+      current_mode = NORMAL;
+      return true;
     }
 
     return false;
   });
 
   screen.Loop(main_screen);
+
+  proc.Stop();
   return 0;
 }

@@ -70,8 +70,8 @@ Token Lexer::NextToken() {
     return Token(TokenType::MINUS, "-");
   case '/':
     if (PeekChar() == '/') {
-      SkipLineComment();
-      return NextToken();
+      std::string comment = ReadLineComment();
+      return Token(TokenType::COMMENT, comment);
     } else {
       ReadChar();
       return Token(TokenType::SLASH, "/");
@@ -123,6 +123,17 @@ Token Lexer::NextToken() {
       return tok;
     }
   }
+}
+
+std::string Lexer::ReadLineComment() {
+  std::string result = "//";
+  ReadChar(); // consume first '/'
+  ReadChar(); // consume second '/'
+  while (ch != '\n' && ch != 0) {
+    result += ch;
+    ReadChar();
+  }
+  return result;
 }
 
 std::string Lexer::ReadString() {

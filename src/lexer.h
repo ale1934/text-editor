@@ -11,6 +11,7 @@ private:
   void ReadChar();
   void SkipWhiteSpace();
   void SkipLineComment();
+  std::string ReadLineComment();
   std::string ReadIdentifier();
   std::string ReadNumber();
   std::string ReadString();
