@@ -45,7 +45,8 @@ enum class TokenType {
   TRUE,
   FALSE,
   FOR,
-  WHILE
+  WHILE,
+  EXIT
 };
 
 inline std::string TokenTypeToString(TokenType type) {
@@ -126,6 +127,8 @@ inline std::string TokenTypeToString(TokenType type) {
     return "FOR";
   case TokenType::WHILE:
     return "WHILE";
+  case TokenType::EXIT:
+    return "EXIT";
   }
   return "UNKNOWN";
 }

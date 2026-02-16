@@ -12,7 +12,6 @@
 #include <ftxui/screen/screen.hpp>
 #include <ftxui/screen/string.hpp>
 #include <mutex>
-#include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <thread>
@@ -54,18 +53,14 @@ struct LiveProcess {
       fd_out = -1;
     }
 
-    // Wait for reader thread
     if (reader.joinable())
       reader.join();
 
-    // Kill child process if still alive
     if (pid > 0) {
       int status;
       waitpid(pid, &status, WNOHANG); // non-blocking
       pid = -1;
     }
-
-    // Clear output
     std::lock_guard<std::mutex> lock(mtx);
     std::queue<std::string> empty;
     std::swap(output_queue, empty);
@@ -73,8 +68,7 @@ struct LiveProcess {
 
   void Start(const std::string &cmd, const std::vector<std::string> &args,
              std::function<void()> on_output = nullptr) {
-    Stop(); // <-- make sure old process is fully stopped
-
+    Stop();
     int pipe_in[2], pipe_out[2];
     if (pipe(pipe_in) == -1 || pipe(pipe_out) == -1)
       return;
@@ -128,7 +122,7 @@ struct LiveProcess {
             output_queue.push(std::string(buffer, n));
           }
           if (on_output)
-            on_output(); // <-- notify screen
+            on_output();
         } else if (n == 0) {
           std::lock_guard<std::mutex> lock(mtx);
           running = false;
@@ -164,6 +158,9 @@ Color ColorForToken(TokenType type) {
   case TokenType::ELSE:
   case TokenType::FUNCTION:
     return Color::DeepPink1;
+
+  case TokenType::EXIT:
+    return Color::DarkSeaGreen;
 
   case TokenType::WHILE:
   case TokenType::FOR:

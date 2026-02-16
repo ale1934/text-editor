@@ -6,7 +6,7 @@ static const std::unordered_map<std::string, TokenType> keywords = {
     {"return", TokenType::RETURN}, {"if", TokenType::IF},
     {"else", TokenType::ELSE},     {"true", TokenType::TRUE},
     {"false", TokenType::FALSE},   {"for", TokenType::FOR},
-    {"while", TokenType::WHILE}};
+    {"while", TokenType::WHILE},   {"exit", TokenType::EXIT}};
 
 TokenType LookupIdent(const std::string &ident) {
   auto it = keywords.find(ident);
